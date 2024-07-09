@@ -8,6 +8,7 @@ from .wholebody import Wholebody
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 class DWposeDetector:
     """
     A pose detect method for image-like data.
@@ -19,10 +20,20 @@ class DWposeDetector:
                     such as https://huggingface.co/yzd-v/DWPose/blob/main/dw-ll_ucoco_384.onnx
         device: (str) 'cpu' or 'cuda:{device_id}'
     """
+
     def __init__(self, model_det, model_pose, device='cpu'):
-        self.pose_estimation = Wholebody(model_det=model_det, model_pose=model_pose, device=device)
+        self.args = model_det, model_pose, device
+
+    def release_memory(self):
+        if hasattr(self, 'pose_estimation'):
+            del self.pose_estimation
+            import gc;
+            gc.collect()
 
     def __call__(self, oriImg):
+        if not hasattr(self, 'pose_estimation'):
+            self.pose_estimation = Wholebody(*self.args)
+
         oriImg = oriImg.copy()
         H, W, C = oriImg.shape
         with torch.no_grad():
@@ -57,6 +68,7 @@ class DWposeDetector:
             pose = dict(bodies=bodies, hands=hands, hands_score=hands_score, faces=faces, faces_score=faces_score)
 
             return pose
+
 
 dwpose_detector = DWposeDetector(
     model_det="models/DWPose/yolox_l.onnx",

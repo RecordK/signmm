@@ -1,4 +1,3 @@
-from tqdm import tqdm
 import decord
 import numpy as np
 
@@ -14,7 +13,7 @@ def get_video_pose(
 
     Args:
         video_path (str): video pose path
-        ref_image (np.ndarray): reference image
+        ref_image (np.ndarray): reference image 
         sample_stride (int, optional): Defaults to 1.
 
     Returns:
@@ -22,9 +21,9 @@ def get_video_pose(
     """
     # select ref-keypoint from reference pose for pose rescale
     ref_pose = dwprocessor(ref_image)
-    ref_keypoint_id = [0, 1, 2, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    ref_keypoint_id = [0, 1, 2, 5, 8, 11, 14, 15, 16, 17]
     ref_keypoint_id = [i for i in ref_keypoint_id \
-                       if len(ref_pose['bodies']['subset']) > 0 and ref_pose['bodies']['subset'][0][i] >= .0]
+                       if ref_pose['bodies']['score'].shape[0] > 0 and ref_pose['bodies']['score'][0][i] > 0.3]
     ref_body = ref_pose['bodies']['candidate'][ref_keypoint_id]
 
     height, width, _ = ref_image.shape
@@ -33,9 +32,7 @@ def get_video_pose(
     vr = decord.VideoReader(video_path, ctx=decord.cpu(0))
     sample_stride *= max(1, int(vr.get_avg_fps() / 24))
 
-    frames = vr.get_batch(list(range(0, len(vr), sample_stride))).asnumpy()
-    detected_poses = [dwprocessor(frm) for frm in tqdm(frames, desc="DWPose")]
-    dwprocessor.release_memory()
+    detected_poses = [dwprocessor(frm) for frm in vr.get_batch(list(range(0, len(vr), sample_stride))).asnumpy()]
 
     detected_bodies = np.stack(
         [p['bodies']['candidate'] for p in detected_poses if p['bodies']['candidate'].shape[0] == 18])[:,
@@ -48,7 +45,7 @@ def get_video_pose(
     a = np.array([ax, ay])
     b = np.array([bx, by])
     output_pose = []
-    # pose rescale
+    # pose rescale 
     for detected_pose in detected_poses:
         detected_pose['bodies']['candidate'] = detected_pose['bodies']['candidate'] * a + b
         detected_pose['faces'] = detected_pose['faces'] * a + b

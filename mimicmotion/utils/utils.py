@@ -10,3 +10,5 @@ def save_to_mp4(frames, save_path, fps=7):
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     write_video(save_path, frames, fps=fps)
 
+
+

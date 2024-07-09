@@ -93,13 +93,13 @@ class MimicMotionPipeline(DiffusionPipeline):
     _callback_tensor_inputs = ["latents"]
 
     def __init__(
-        self,
-        vae: AutoencoderKLTemporalDecoder,
-        image_encoder: CLIPVisionModelWithProjection,
-        unet: UNetSpatioTemporalConditionModel,
-        scheduler: EulerDiscreteScheduler,
-        feature_extractor: CLIPImageProcessor,
-        pose_net: PoseNet,
+            self,
+            vae: AutoencoderKLTemporalDecoder,
+            image_encoder: CLIPVisionModelWithProjection,
+            unet: UNetSpatioTemporalConditionModel,
+            scheduler: EulerDiscreteScheduler,
+            feature_extractor: CLIPImageProcessor,
+            pose_net: PoseNet,
     ):
         super().__init__()
 
@@ -115,11 +115,11 @@ class MimicMotionPipeline(DiffusionPipeline):
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
     def _encode_image(
-        self, 
-        image: PipelineImageInput, 
-        device: Union[str, torch.device], 
-        num_videos_per_prompt: int, 
-        do_classifier_free_guidance: bool):
+            self,
+            image: PipelineImageInput,
+            device: Union[str, torch.device],
+            num_videos_per_prompt: int,
+            do_classifier_free_guidance: bool):
         dtype = next(self.image_encoder.parameters()).dtype
 
         if not isinstance(image, torch.Tensor):
@@ -161,32 +161,14 @@ class MimicMotionPipeline(DiffusionPipeline):
 
         return image_embeddings
 
-    def _encode_pose_image(
-        self, 
-        pose_image: torch.Tensor, 
-        do_classifier_free_guidance: bool,
-    ):
-        # Get latents_pose
-        pose_latents = self.pose_net(pose_image)
-
-        if do_classifier_free_guidance:
-            negative_pose_latents = torch.zeros_like(pose_latents)
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            pose_latents = torch.cat([negative_pose_latents, pose_latents])
-
-        return pose_latents
-
     def _encode_vae_image(
-        self,
-        image: torch.Tensor,
-        device: Union[str, torch.device],
-        num_videos_per_prompt: int,
-        do_classifier_free_guidance: bool,
+            self,
+            image: torch.Tensor,
+            device: Union[str, torch.device],
+            num_videos_per_prompt: int,
+            do_classifier_free_guidance: bool,
     ):
-        image = image.to(device=device)
+        image = image.to(device=device, dtype=self.vae.dtype)
         image_latents = self.vae.encode(image).latent_dist.mode()
 
         if do_classifier_free_guidance:
@@ -203,14 +185,14 @@ class MimicMotionPipeline(DiffusionPipeline):
         return image_latents
 
     def _get_add_time_ids(
-        self,
-        fps: int,
-        motion_bucket_id: int,
-        noise_aug_strength: float,
-        dtype: torch.dtype,
-        batch_size: int,
-        num_videos_per_prompt: int,
-        do_classifier_free_guidance: bool,
+            self,
+            fps: int,
+            motion_bucket_id: int,
+            noise_aug_strength: float,
+            dtype: torch.dtype,
+            batch_size: int,
+            num_videos_per_prompt: int,
+            do_classifier_free_guidance: bool,
     ):
         add_time_ids = [fps, motion_bucket_id, noise_aug_strength]
 
@@ -233,10 +215,10 @@ class MimicMotionPipeline(DiffusionPipeline):
         return add_time_ids
 
     def decode_latents(
-        self, 
-        latents: torch.Tensor, 
-        num_frames: int, 
-        decode_chunk_size: int = 8):
+            self,
+            latents: torch.Tensor,
+            num_frames: int,
+            decode_chunk_size: int = 8):
         # [batch, frames, channels, height, width] -> [batch*frames, channels, height, width]
         latents = latents.flatten(0, 1)
 
@@ -280,16 +262,16 @@ class MimicMotionPipeline(DiffusionPipeline):
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
     def prepare_latents(
-        self,
-        batch_size: int,
-        num_frames: int,
-        num_channels_latents: int,
-        height: int,
-        width: int,
-        dtype: torch.dtype,
-        device: Union[str, torch.device],
-        generator: torch.Generator,
-        latents: Optional[torch.Tensor] = None,
+            self,
+            batch_size: int,
+            num_frames: int,
+            num_channels_latents: int,
+            height: int,
+            width: int,
+            dtype: torch.dtype,
+            device: Union[str, torch.device],
+            generator: torch.Generator,
+            latents: Optional[torch.Tensor] = None,
     ):
         shape = (
             batch_size,
@@ -322,9 +304,8 @@ class MimicMotionPipeline(DiffusionPipeline):
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
-        return True # TODO
         if isinstance(self.guidance_scale, (int, float)):
-            return self.guidance_scale
+            return self.guidance_scale > 1
         return self.guidance_scale.max() > 1
 
     @property
@@ -350,31 +331,30 @@ class MimicMotionPipeline(DiffusionPipeline):
 
     @torch.no_grad()
     def __call__(
-        self,
-        image: Union[PIL.Image.Image, List[PIL.Image.Image], torch.FloatTensor],
-        image_pose: Union[torch.FloatTensor],
-        height: int = 576,
-        width: int = 1024,
-        num_frames: Optional[int] = None,
-        tile_size: Optional[int] = 16,
-        tile_overlap: Optional[int] = 4,
-        num_inference_steps: int = 25,
-        min_guidance_scale: float = 1.0,
-        max_guidance_scale: float = 3.0,
-        fps: int = 7,
-        motion_bucket_id: int = 127,
-        noise_aug_strength: float = 0.02,
-        image_only_indicator: bool = False,
-        decode_chunk_size: Optional[int] = None,
-        num_videos_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        latents: Optional[torch.FloatTensor] = None,
-        first_n_frames=None,
-        output_type: Optional[str] = "pil",
-        callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
-        callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        return_dict: bool = True,
-        device: Union[str, torch.device] =None,
+            self,
+            image: Union[PIL.Image.Image, List[PIL.Image.Image], torch.FloatTensor],
+            image_pose: Union[torch.FloatTensor],
+            height: int = 576,
+            width: int = 1024,
+            num_frames: Optional[int] = None,
+            tile_size: Optional[int] = 16,
+            tile_overlap: Optional[int] = 4,
+            num_inference_steps: int = 25,
+            min_guidance_scale: float = 1.0,
+            max_guidance_scale: float = 3.0,
+            fps: int = 7,
+            motion_bucket_id: int = 127,
+            noise_aug_strength: float = 0.02,
+            image_only_indicator: bool = False,
+            decode_chunk_size: Optional[int] = None,
+            num_videos_per_prompt: Optional[int] = 1,
+            generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+            latents: Optional[torch.FloatTensor] = None,
+            output_type: Optional[str] = "pil",
+            callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
+            callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+            return_dict: bool = True,
+            device: Union[str, torch.device] = None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -389,7 +369,7 @@ class MimicMotionPipeline(DiffusionPipeline):
             width (`int`, *optional*, defaults to `self.unet.config.sample_size * self.vae_scale_factor`):
                 The width in pixels of the generated image.
             num_frames (`int`, *optional*):
-                The number of video frames to generate. Defaults to 14 for `stable-video-diffusion-img2vid` 
+                The number of video frames to generate. Defaults to 14 for `stable-video-diffusion-img2vid`
                 and to 25 for `stable-video-diffusion-img2vid-xt`
             num_inference_steps (`int`, *optional*, defaults to 25):
                 The number of denoising steps. More denoising steps usually lead to a higher quality image at the
@@ -402,17 +382,17 @@ class MimicMotionPipeline(DiffusionPipeline):
                 Frames per second.The rate at which the generated images shall be exported to a video after generation.
                 Note that Stable Diffusion Video's UNet was micro-conditioned on fps-1 during training.
             motion_bucket_id (`int`, *optional*, defaults to 127):
-                The motion bucket ID. Used as conditioning for the generation. 
+                The motion bucket ID. Used as conditioning for the generation.
                 The higher the number the more motion will be in the video.
             noise_aug_strength (`float`, *optional*, defaults to 0.02):
-                The amount of noise added to the init image, 
+                The amount of noise added to the init image,
                 the higher it is the less the video will look like the init image. Increase it for more motion.
             image_only_indicator (`bool`, *optional*, defaults to False):
                 Whether to treat the inputs as batch of images instead of videos.
             decode_chunk_size (`int`, *optional*):
                 The number of frames to decode at a time.The higher the chunk size, the higher the temporal consistency
-                between frames, but also the higher the memory consumption. 
-                By default, the decoder will decode all frames at once for maximal quality. 
+                between frames, but also the higher the memory consumption.
+                By default, the decoder will decode all frames at once for maximal quality.
                 Reduce `decode_chunk_size` to reduce memory usage.
             num_videos_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
@@ -442,7 +422,7 @@ class MimicMotionPipeline(DiffusionPipeline):
 
         Returns:
             [`~pipelines.stable_diffusion.StableVideoDiffusionPipelineOutput`] or `tuple`:
-                If `return_dict` is `True`, 
+                If `return_dict` is `True`,
                 [`~pipelines.stable_diffusion.StableVideoDiffusionPipelineOutput`] is returned,
                 otherwise a `tuple` is returned where the first element is a list of list with the generated frames.
 
@@ -488,7 +468,9 @@ class MimicMotionPipeline(DiffusionPipeline):
         self._guidance_scale = max_guidance_scale
 
         # 3. Encode input image
+        self.image_encoder.to(device)
         image_embeddings = self._encode_image(image, device, num_videos_per_prompt, self.do_classifier_free_guidance)
+        self.image_encoder.cpu()
 
         # NOTE: Stable Diffusion Video was conditioned on fps - 1, which
         # is why it is reduced here.
@@ -499,10 +481,7 @@ class MimicMotionPipeline(DiffusionPipeline):
         noise = randn_tensor(image.shape, generator=generator, device=device, dtype=image.dtype)
         image = image + noise_aug_strength * noise
 
-        needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
-        if needs_upcasting:
-            self.vae.to(dtype=torch.float32)
-
+        self.vae.to(device)
         image_latents = self._encode_vae_image(
             image,
             device=device,
@@ -510,15 +489,7 @@ class MimicMotionPipeline(DiffusionPipeline):
             do_classifier_free_guidance=self.do_classifier_free_guidance,
         )
         image_latents = image_latents.to(image_embeddings.dtype)
-
-        ref_latent = first_n_frames[:, 0] if first_n_frames is not None else None
-        pose_latents = self._encode_pose_image(
-            image_pose, do_classifier_free_guidance=self.do_classifier_free_guidance,
-        )
-
-        # cast back to fp16 if needed
-        if needs_upcasting:
-            self.vae.to(dtype=torch.float16)
+        self.vae.cpu()
 
         # Repeat the image latents for each frame so we can concatenate them with the noise
         # image_latents [batch, channels, height, width] ->[batch, num_frames, channels, height, width]
@@ -567,11 +538,16 @@ class MimicMotionPipeline(DiffusionPipeline):
 
         # 8. Denoising loop
         self._num_timesteps = len(timesteps)
-        pose_latents = einops.rearrange(pose_latents, '(b f) c h w -> b f c h w', f=num_frames)
         indices = [[0, *range(i + 1, min(i + tile_size, num_frames))] for i in
                    range(0, num_frames - tile_size + 1, tile_size - tile_overlap)]
         if indices[-1][-1] < num_frames - 1:
             indices.append([0, *range(num_frames - tile_size + 1, num_frames)])
+
+        self.pose_net.to(device)
+        self.unet.to(device)
+
+        with torch.cuda.device(device):
+            torch.cuda.empty_cache()
 
         with self.progress_bar(total=len(timesteps) * len(indices)) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -585,20 +561,34 @@ class MimicMotionPipeline(DiffusionPipeline):
                 # predict the noise residual
                 noise_pred = torch.zeros_like(image_latents)
                 noise_pred_cnt = image_latents.new_zeros((num_frames,))
-                # image_pose = pixel_values_pose[:, frame_start:frame_start + self.num_frames, ...]
                 weight = (torch.arange(tile_size, device=device) + 0.5) * 2. / tile_size
                 weight = torch.minimum(weight, 2 - weight)
                 for idx in indices:
+                    # classification-free inference
+                    pose_latents = self.pose_net(image_pose[idx].to(device))
                     _noise_pred = self.unet(
-                        latent_model_input[:, idx],
+                        latent_model_input[:1, idx],
                         t,
-                        encoder_hidden_states=image_embeddings,
-                        added_time_ids=added_time_ids,
-                        pose_latents=pose_latents[:, idx].flatten(0, 1),
+                        encoder_hidden_states=image_embeddings[:1],
+                        added_time_ids=added_time_ids[:1],
+                        pose_latents=None,
                         image_only_indicator=image_only_indicator,
                         return_dict=False,
                     )[0]
-                    noise_pred[:, idx] += _noise_pred * weight[:, None, None, None]
+                    noise_pred[:1, idx] += _noise_pred * weight[:, None, None, None]
+
+                    # normal inference
+                    _noise_pred = self.unet(
+                        latent_model_input[1:, idx],
+                        t,
+                        encoder_hidden_states=image_embeddings[1:],
+                        added_time_ids=added_time_ids[1:],
+                        pose_latents=pose_latents,
+                        image_only_indicator=image_only_indicator,
+                        return_dict=False,
+                    )[0]
+                    noise_pred[1:, idx] += _noise_pred * weight[:, None, None, None]
+
                     noise_pred_cnt[idx] += weight
                     progress_bar.update()
                 noise_pred.div_(noise_pred_cnt[:, None, None, None])
@@ -607,12 +597,6 @@ class MimicMotionPipeline(DiffusionPipeline):
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_cond - noise_pred_uncond)
-
-                if first_n_frames is not None:
-                    sigma = self.scheduler.sigmas[self.scheduler.step_index]
-                    _latents = latents[:, 1:1 + first_n_frames.size(1)]
-                    tmp = (first_n_frames - _latents / (sigma ** 2 + 1)) / (-sigma / ((sigma ** 2 + 1) ** 0.5))
-                    noise_pred[:, 1:1 + first_n_frames.size(1)] = tmp
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
@@ -625,10 +609,11 @@ class MimicMotionPipeline(DiffusionPipeline):
 
                     latents = callback_outputs.pop("latents", latents)
 
+        self.pose_net.cpu()
+        self.unet.cpu()
+
         if not output_type == "latent":
-            # cast back to fp16 if needed
-            if needs_upcasting:
-                self.vae.to(dtype=torch.float16)
+            self.vae.decoder.to(device)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
             frames = tensor2vid(frames, self.image_processor, output_type=output_type)
         else:

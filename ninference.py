@@ -9,8 +9,12 @@ from pathlib import Path
 import numpy as np
 import torch.jit
 from torchvision.datasets.folder import pil_loader
-from torchvision.transforms.functional import pil_to_tensor, resize, center_crop,rotate
+from torchvision.transforms.functional import pil_to_tensor, resize, center_crop
 from torchvision.transforms.functional import to_pil_image
+
+from mimicmotion.utils.geglu_patch import patch_geglu_inplace
+
+patch_geglu_inplace()
 
 from constants import ASPECT_RATIO
 
@@ -21,9 +25,7 @@ from mimicmotion.dwpose.preprocess import get_video_pose, get_image_pose
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s: [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def preprocess(video_path, image_path, resolution=576, sample_stride=2):
@@ -36,9 +38,7 @@ def preprocess(video_path, image_path, resolution=576, sample_stride=2):
         sample_stride (int, optional): Defaults to 2.
     """
     image_pixels = pil_loader(image_path)
-
     image_pixels = pil_to_tensor(image_pixels)  # (c, h, w)
-    image_pixels = rotate(image_pixels, angle=90) # rotate 추가
     h, w = image_pixels.shape[-2:]
     ############################ compute target h/w according to original aspect ratio ###############################
     if h > w:
@@ -63,11 +63,10 @@ def preprocess(video_path, image_path, resolution=576, sample_stride=2):
 
 def run_pipeline(pipeline: MimicMotionPipeline, image_pixels, pose_pixels, device, task_config):
     image_pixels = [to_pil_image(img.to(torch.uint8)) for img in (image_pixels + 1.0) * 127.5]
-    pose_pixels = pose_pixels.unsqueeze(0).to(device)
     generator = torch.Generator(device=device)
     generator.manual_seed(task_config.seed)
     frames = pipeline(
-        image_pixels, image_pose=pose_pixels, num_frames=pose_pixels.size(1),
+        image_pixels, image_pose=pose_pixels, num_frames=pose_pixels.size(0),
         tile_size=task_config.num_frames, tile_overlap=task_config.frames_overlap,
         height=pose_pixels.shape[-2], width=pose_pixels.shape[-1], fps=7,
         noise_aug_strength=task_config.noise_aug_strength, num_inference_steps=task_config.num_inference_steps,
@@ -89,8 +88,7 @@ def main(args):
     if not args.no_use_float16:
         torch.set_default_dtype(torch.float16)
 
-    # infer_config = OmegaConf.load(args.inference_config)
-    infer_config = OmegaConf.load(args.i)
+    infer_config = OmegaConf.load(args.inference_config)
     pipeline = create_pipeline(infer_config, device)
 
     for task in infer_config.test_case:
@@ -99,7 +97,7 @@ def main(args):
             task.ref_video_path, task.ref_image_path,
             resolution=task.resolution, sample_stride=task.sample_stride
         )
-        ########################################### Run mm pipeline ###########################################
+        ########################################### Run MimicMotion pipeline ###########################################
         _video_frames = run_pipeline(
             pipeline,
             image_pixels, pose_pixels,
@@ -126,7 +124,6 @@ def set_logger(log_file=None, log_level=logging.INFO):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--log_file", type=str, default=None)
-    # parser.add_argument("--inference_config", type=str, default="configs/test.yaml")  # ToDo
     parser.add_argument("--i", type=str, default="configs/test.yaml")  # ToDo
     parser.add_argument("--output_dir", type=str, default="outputs/", help="path to output")
     parser.add_argument("--no_use_float16",
